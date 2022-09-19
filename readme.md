@@ -1,4 +1,4 @@
-# ssocket 简化的socket接口
+# 简化的socket接口
 
 ## 简述
 
