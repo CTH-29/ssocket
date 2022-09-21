@@ -36,7 +36,6 @@
 #endif
 
 int _socket_wait(int socket_fd, int dir, int timeout_ms);
-bool _parse_url(ssocket_t *sso);
 bool _check_addr(const char *addr);
 void _set_tcp_opts(int socket_fd);
 
@@ -79,35 +78,6 @@ int _socket_wait(int socket_fd, int dir, int timeout_ms)
         return 0;
 }
 
-/* protocol://hostname:port[/xxx] */
-bool _parse_url(ssocket_t *sso)
-{
-    char *substr1, *substr2, *substr3;
-
-    free(sso->protocol);
-    free(sso->hostname);
-    free(sso->port);
-
-    substr1 = strstr(sso->url, "://");
-    if (substr1 == NULL)
-        return false;
-    sso->protocol = strndup(sso->url, substr1 - sso->url);
-
-    substr1 += 3;
-    substr2 = strstr(substr1, ":");
-    substr3 = strstr(substr1, "/");
-    if (substr2 == NULL)
-        return false;
-    sso->hostname = strndup(substr1, substr2 - substr1);
-
-    if (substr3 == NULL)
-        sso->port = strdup(substr2 + 1);
-    else
-        sso->port = strndup(substr2 + 1, substr3 - substr2 - 1);
-
-    return true;
-}
-
 bool _check_hostname(const char *hostname)
 {
     int i, len = strlen(hostname);
@@ -137,7 +107,7 @@ void _set_tcp_opts(int socket_fd)
     fcntl(socket_fd, F_SETFD, FD_CLOEXEC);
 }
 
-ssocket_t *ssocket_create(char *url, int rbuf_size, int sbuf_size, int timeout_conn, int timeout_recv, int timeout_send)
+ssocket_t *ssocket_create(int rbuf_size, int sbuf_size, int timeout_conn, int timeout_recv, int timeout_send)
 {
     ssocket_t *sso = (ssocket_t *)malloc(sizeof(ssocket_t));
     if (sso == NULL)
@@ -149,7 +119,6 @@ ssocket_t *ssocket_create(char *url, int rbuf_size, int sbuf_size, int timeout_c
     sso->sbuf_size = sbuf_size > 0 ? sbuf_size : 128;
     sso->rbuf = (char *)malloc(sso->rbuf_size);
     sso->sbuf = (char *)malloc(sso->sbuf_size);
-    sso->url = strdup(url);
     sso->timeout_conn = timeout_conn > 0 ? timeout_conn : 0;
     sso->timeout_recv = timeout_recv > 0 ? timeout_recv : 0;
     sso->timeout_send = timeout_send > 0 ? timeout_send : 0;
@@ -162,14 +131,50 @@ void ssocket_destory(ssocket_t *sso)
     {
         if (sso->fd != INVALID_FD)
             ssocket_disconnect(sso);
-        free(sso->url);
         free(sso->protocol);
         free(sso->hostname);
-        free(sso->port);
         free(sso->rbuf);
         free(sso->sbuf);
         free(sso);
     }
+}
+
+bool ssocket_set_addr(ssocket_t *sso, const char *protocol, const char *hostname, unsigned short port)
+{
+    free(sso->protocol);
+    free(sso->hostname);
+    sso->protocol = strdup(protocol);
+    sso->hostname = strdup(hostname);
+    sso->port = port;
+}
+
+/* protocol://hostname:port[/xxx] */
+bool ssocket_set_url(ssocket_t *sso, const char *url)
+{
+    char *substr1, *substr2, *substr3, *portstr;
+
+    free(sso->protocol);
+    free(sso->hostname);
+
+    substr1 = strstr(url, "://");
+    if (substr1 == NULL)
+        return false;
+    sso->protocol = strndup(url, substr1 - url);
+
+    substr1 += 3;
+    substr2 = strstr(substr1, ":");
+    substr3 = strstr(substr1, "/");
+    if (substr2 == NULL)
+        return false;
+    sso->hostname = strndup(substr1, substr2 - substr1);
+
+    if (substr3 == NULL)
+        portstr = strdup(substr2 + 1);
+    else
+        portstr = strndup(substr2 + 1, substr3 - substr2 - 1);
+    sso->port = atoi(portstr);
+    free(portstr);
+    return true;
 }
 
 bool ssocket_connect(ssocket_t *sso)
@@ -178,12 +183,6 @@ bool ssocket_connect(ssocket_t *sso)
     struct sockaddr_in server;
 
     CHECK_NULL(sso, false);
-
-    if (!_parse_url(sso))
-    {
-        _ssocket_debug("parse url fail");
-        return false;
-    }
 
     if (!(strstr(sso->protocol, "TCP") || strstr(sso->protocol, "tcp")))
     {
@@ -220,13 +219,7 @@ bool ssocket_connect(ssocket_t *sso)
         server.sin_addr = *(addr_list[0]);
     }
 
-    int _port = atoi(sso->port);
-    if (_port < 0 || _port > 0xFFFF)
-    {
-        _ssocket_debug("invalid port [%s]", sso->port);
-        return false;
-    }
-    server.sin_port = htons(_port);
+    server.sin_port = htons(sso->port);
 
     _ssocket_debug("server ip = [%s] port = [%d]", inet_ntoa(server.sin_addr), ntohs(server.sin_port));
 
@@ -330,6 +323,7 @@ bool ssocket_send(ssocket_t *sso)
         send_offset += n;
         len -= n;
     }
+    ssocket_send_clear(sso);
     return true;
 }
 
@@ -385,9 +379,8 @@ void ssocket_dump(ssocket_t *sso)
     printf("\tfd = %d\n", sso->fd);
     printf("\trbuf[%d/%d] = %s\n", sso->rbuf_len, sso->rbuf_size, sso->rbuf);
     printf("\tsbuf[%d/%d] = %s\n", sso->sbuf_len, sso->sbuf_size, sso->sbuf);
-    printf("\turl = %s\n", sso->url);
     printf("\tprotocol = %s\n", sso->protocol);
     printf("\thostname = %s\n", sso->hostname);
-    printf("\tport = %s\n", sso->port);
+    printf("\tport = %d\n", sso->port);
     printf("\ttimeout = %d,%d,%d\n", sso->timeout_conn, sso->timeout_recv, sso->timeout_send);
 }
