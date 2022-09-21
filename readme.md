@@ -17,7 +17,8 @@ ssocket(simplied socket interface) 用来简化linux系统里socket的接口
 ## 测试
 
 ```bash
-cd ./build
+mkdir build
+cd build
 cmake ..
 make
 run ./ssocket
