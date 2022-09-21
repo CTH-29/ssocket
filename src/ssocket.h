@@ -26,12 +26,12 @@ ssocket_t *ssocket_create(int timeout_conn, int timeout_recv, int timeout_send);
 void ssocket_destory(ssocket_t *sso);
 
 bool ssocket_set_url(ssocket_t *sso, const char *url);
-bool ssocket_set_addr(ssocket_t *sso, const char *protocol, const char *hostname, unsigned short port);
+bool ssocket_set_addr(ssocket_t *sso, const char *protocol, const char *hostname, const char *port);
 
 bool ssocket_connect(ssocket_t *sso);
 bool ssocket_disconnect(ssocket_t *sso);
 
-bool ssocket_recv_ready(ssocket_t *sso);
+bool ssocket_recv_ready(ssocket_t *sso, int time_out);
 
 bool ssocket_send(ssocket_t *sso, const char *sbuf, int sbuf_len);
 int ssocket_recv(ssocket_t *sso, char *rbuf, int rbuf_len);
