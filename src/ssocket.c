@@ -107,18 +107,12 @@ void _set_tcp_opts(int socket_fd)
     fcntl(socket_fd, F_SETFD, FD_CLOEXEC);
 }
 
-ssocket_t *ssocket_create(int rbuf_size, int sbuf_size, int timeout_conn, int timeout_recv, int timeout_send)
+ssocket_t *ssocket_create(int timeout_conn, int timeout_recv, int timeout_send)
 {
     ssocket_t *sso = (ssocket_t *)malloc(sizeof(ssocket_t));
     if (sso == NULL)
         return NULL;
     sso->fd = INVALID_FD;
-    sso->rbuf_len = 0;
-    sso->sbuf_len = 0;
-    sso->rbuf_size = rbuf_size > 0 ? rbuf_size : 128;
-    sso->sbuf_size = sbuf_size > 0 ? sbuf_size : 128;
-    sso->rbuf = (char *)malloc(sso->rbuf_size);
-    sso->sbuf = (char *)malloc(sso->sbuf_size);
     sso->timeout_conn = timeout_conn > 0 ? timeout_conn : 0;
     sso->timeout_recv = timeout_recv > 0 ? timeout_recv : 0;
     sso->timeout_send = timeout_send > 0 ? timeout_send : 0;
@@ -133,8 +127,6 @@ void ssocket_destory(ssocket_t *sso)
             ssocket_disconnect(sso);
         free(sso->protocol);
         free(sso->hostname);
-        free(sso->rbuf);
-        free(sso->sbuf);
         free(sso);
     }
 }
@@ -288,32 +280,19 @@ bool ssocket_disconnect(ssocket_t *sso)
     return true;
 }
 
-bool ssocket_send_clear(ssocket_t *sso)
+bool ssocket_send(ssocket_t *sso, const char *sbuf, int sbuf_len)
 {
-    sso->sbuf[0] = 0;
-    sso->sbuf_len = 0;
-}
-
-bool ssocket_recv_clear(ssocket_t *sso)
-{
-    sso->rbuf[0] = 0;
-    sso->rbuf_len = 0;
-}
-
-bool ssocket_send(ssocket_t *sso)
-{
-    int ret;
     int send_offset = 0;
-    int len = sso->sbuf_len;
     CHECK_NULL(sso, false);
     CHECK_SOCKET(sso->fd, false);
+    CHECK_NULL(sbuf, false);
 
-    while (len > 0)
+    while (sbuf_len > 0)
     {
         int n;
         if (ssocket_write_wait(sso->fd, sso->timeout_send) > 0)
             return false;
-        n = send(sso->fd, sso->sbuf + send_offset, len, MSG_NOSIGNAL);
+        n = send(sso->fd, sbuf + send_offset, sbuf_len, MSG_NOSIGNAL);
         if (n < 0)
         {
             if (errno != EAGAIN || errno != EWOULDBLOCK)
@@ -321,36 +300,31 @@ bool ssocket_send(ssocket_t *sso)
             n = 0;
         }
         send_offset += n;
-        len -= n;
+        sbuf_len -= n;
     }
-    ssocket_send_clear(sso);
     return true;
 }
-
-bool ssocket_recv(ssocket_t *sso)
+int ssocket_recv(ssocket_t *sso, char *rbuf, int rbuf_len)
 {
     int ret;
-    int recv_len;
-    char *recv_p;
-
-    CHECK_NULL(sso, false);
-    CHECK_SOCKET(sso->fd, false);
+    CHECK_NULL(sso, 0);
+    CHECK_SOCKET(sso->fd, 0);
+    CHECK_NULL(rbuf, 0);
 
     if (ssocket_read_wait(sso->fd, sso->timeout_recv) == 0)
     {
-        ret = recv(sso->fd, sso->rbuf, sso->rbuf_size - sso->rbuf_len, 0);
+        ret = recv(sso->fd, rbuf, rbuf_len, 0);
         if (ret > 0)
         {
-            sso->rbuf_len += ret;
-            sso->rbuf[sso->rbuf_len] = 0;
-            return true;
+            rbuf[ret] = 0;
+            return ret;
         }
         else
-            return false; /* TCP socket has been disconnected. */
+            return 0; /* TCP socket has been disconnected. */
     }
     else
     {
-        return false;
+        return 0;
     }
 }
 
@@ -361,24 +335,10 @@ bool ssocket_recv_ready(ssocket_t *sso)
     return (_socket_wait(sso->fd, 1, 0) == 0) ? true : false;
 }
 
-bool ssocket_printf(ssocket_t *sso, const char *fmt, ...)
-{
-    CHECK_NULL(sso, false);
-    CHECK_SOCKET(sso->fd, false);
-    va_list args;
-    va_start(args, fmt);
-    int len = vsnprintf(sso->sbuf + sso->sbuf_len, sso->sbuf_size - sso->sbuf_len, fmt, args);
-    va_end(args);
-    sso->sbuf_len += len;
-    return true;
-}
-
 void ssocket_dump(ssocket_t *sso)
 {
     printf("ssocket_t dump:\n");
     printf("\tfd = %d\n", sso->fd);
-    printf("\trbuf[%d/%d] = %s\n", sso->rbuf_len, sso->rbuf_size, sso->rbuf);
-    printf("\tsbuf[%d/%d] = %s\n", sso->sbuf_len, sso->sbuf_size, sso->sbuf);
     printf("\tprotocol = %s\n", sso->protocol);
     printf("\thostname = %s\n", sso->hostname);
     printf("\tport = %d\n", sso->port);
